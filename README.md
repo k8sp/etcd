@@ -31,8 +31,24 @@ etcd的Github页面的Releases列表里有
 和客户端程序通信，此外 etcd 进程之间通过 2380 端口互相通信和协调。如果
 当前主进程（*master*）挂了，剩下的进程利用Raft协议推举一个新的主进程。
 
-TODO(y): 如何让进程之间互相知道对方
+有两种多点部署的机制：static和runtime。
 
-TODO(y): 主进程的角色
+### Static `etcd` Cluster
 
+如果我们假设etcd进程不会挂，那么static方式就够了。static方式下，为了让
+多个etcd进程互相知道对方，我们给每个进程一个命令行参数
+`--initial-cluster`，用来指定etcd cluster里所有的进程，比如：
 
+```
+infra0=http://10.0.1.10:2380,infra1=http://10.0.1.11:2380,infra2=http://10.0.1.12:2380
+```
+
+此外，还需要告诉每个etcd进程自己是其中哪一个，为此需要设置
+`--initial-advertise-peer-urls`，比如：
+
+```
+--initial-advertise-peer-urls http://10.0.1.10:2380
+```
+
+关于static方式，请参见CoreOS公司的
+[这篇文档](https://coreos.com/etcd/docs/latest/clustering.html#static)。
