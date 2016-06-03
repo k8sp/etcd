@@ -1,0 +1,7 @@
+*~
+*.zip
+*.gz
+*.etcd
+etcd*
+discovery*
+*.log
