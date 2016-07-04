@@ -1,11 +1,23 @@
 # 玩转`etcd`
 
-`etcd`事实上是Hadoop Zookeeper的替代。而Zookeeper是Google Chubby的开源
-仿制。对Chubby的描述见
-[这篇论文](http://research.google.com/archive/chubby.html)。文中说
-Chubby是一个*lock service*，实际上简单的理解是Chubby是一个key-value存
-储系统，和分布式文件系统（如GFS）类似，只是为了性能考虑，每个etcd维护
-的文件大小尽量小于1MB。
+`etcd`是Hadoop Zookeeper的替代。而Zookeeper是Google Chubby的开源仿制。
+对Chubby的描述见
+[这篇论文](http://research.google.com/archive/chubby.html)。
+
+etcd是一个key-value存储系统，通常由多个进程协同工作。如果其中一个进程
+挂了，剩下的进程会互相讨论选出一个新的首领。这些互相讨论的协议被称为
+Paxos。etcd实现的是Paxos的一个变种，称为Raft。
+
+因为一个etcd机群利用Raft协议可以做到永远不死，我们可以借助etcd的这个特
+性，设计自己的“不死”的分布式系统。一个简单的做法是：我们的分布式系统中
+的每个进程都把自己注册到etcd机群里去，并且每个进程每隔一秒种更新自己的
+状态，否则让etcd把自己的记录删除。这样etcd机群里总是存储着我们的系统中
+活着的进程的状态。任何时候，我们都可以取其中进程名字的hash值最小的，作
+为我们的分布式系统中各个进程的首领。
+
+Kubernetes和在其上运行的很多分布式系统，都利用了etcd进群的“不死”的特性
+（而不是自己实现Raft协议）来实现自己的“不死”。所以etcd是机群系统中特别
+基础特别重要的一环。在了解Kubernetes之前，得先了解etcd。
 
 ## 文档
 

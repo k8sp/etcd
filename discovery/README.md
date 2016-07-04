@@ -1,7 +1,12 @@
-\# etcd 机群和 Discovery
+# etcd 机群和 Discovery
 
 在这个试验里，我们启动一个有四个node的Vagrant虚拟机群。我们在其中第一个node上运行一个单进程的etcd机群，用它作为discovery service，来在剩下三个nodes上启动一个三进程的etcd机群。
 
+  * [Vagrant 虚拟机群](#vagrant-虚拟机群)
+  * [单进程etcd机群](#单进程etcd机群)
+  * [Pitfalls](#pitfalls)
+    * [在Docker里运行etcd](#在docker里运行etcd)
+    * [Don't Use CoreOS's etcd](#dont-use-coreoss-etcd)
 
 
 ## Vagrant 虚拟机群
@@ -45,7 +50,7 @@ for ((i = 1; i <= 4; i++ )); do vagrant ssh core-0$i -c "ifconfig eth1"; done
 docker run --net=host --rm --name etcd quay.io/coreos/etcd:v2.3.2
 ```
 
-注意，CoreOS虽然自带etcd程序，但是不要用，因为[版本很老](#don't-use-coreos's-etcd)。关于在Docker里启动etcd，我碰到[一个问题](#在docker里运行etcd)。
+注意，CoreOS虽然自带etcd程序，但是不要用，因为[版本很老](#dont-use-coreoss-etcd)。关于`--net=host`参数，请参见我碰到的[一个问题](#在docker里运行etcd)。
 
 
 
@@ -108,6 +113,13 @@ docker run -p 127.0.0.1:4001:4001 -p 127.0.0.1:7001:7001 -p 127.0.0.1:2379:2379 
 ```
 core@core-01 ~ $ etcdctl --endpoints=127.0.0.1:4001,127.0.0.1:2379 ls /
 Error:  EOF
+```
+
+最后尝试运行Docker image里面的etcdctl，这样就OK了：
+
+```
+core@core-01 ~ $ docker exec learn-etcd /etcdctl set /foo bar
+bar
 ```
 
 ### Don't Use CoreOS's etcd
