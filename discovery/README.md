@@ -18,10 +18,11 @@ git clone https://github.com/coreos/coreos-vagrant
 cd coreos-vagrant
 ```
 
-编辑 `Vagrantfile`，引入两个修改：
+编辑 `Vagrantfile`，引入几个修改：
 
+1. `$update_channel = "alpha"` 改成 `$update_channel = "stable"`
 1. `$num_instances = 1` 改成 `$num_instances = 4`，这样机群里有四个nodes。
-1. `$vm_memory = 1024` 改成 `$vm_memory = 2048`，这样每个node有4GB内存。
+1. `$vm_memory = 1024` 改成 `$vm_memory = 2048`，这样每个node有2GB内存。
 
 这样我们就可以启动机群了：
 
@@ -42,17 +43,84 @@ for ((i = 1; i <= 4; i++ )); do vagrant ssh core-0$i -c "ifconfig eth1"; done
 
 ## 单进程etcd机群
 
-我们在名为 core-01 （IP地址是172.17.8.101）的虚拟机上启动一个单进程的etcd机群：
+### 在host上运行
 
-运行 `vagrant ssh core-01` 可以登录到 core-01 上。运行 `etcdctl --version`可以看到本机的etcdctl的版本。我的是`2.3.2`。接下来可以通过 Docker 启动一个对应版本的 etcd container：
+我们在名为 core-01 （IP地址是172.17.8.101）的虚拟机上启动一个单进程的etcd机群很容易：
 
 ```
-docker run --net=host --rm --name etcd quay.io/coreos/etcd:v2.3.2
+vagrant ssh core-04
+etcd2
 ```
 
-注意，CoreOS虽然自带etcd程序，但是不要用，因为[版本很老](#dont-use-coreoss-etcd)。关于`--net=host`参数，请参见我碰到的[一个问题](#在docker里运行etcd)。
+在另一个terminal里可以运行
+
+```
+etcdctl ls /
+```
+
+来连接本机的 etcd2 进程。注意 `etcdctl ls /`相当于`etcdctl --endpoints=127.0.0.1:4001,127.0.0.1:2379 ls /`。
+
+CoreOS里 `/usr/bin/etcd2` 和 `/usr/bin/etcdctl` 的版本是一致的，而 `/usr/bin/etcd` 通常是一个很老的版本。
+
+### 在container里运行
+
+我们也可以通过 Docker 启动一个对应版本的 etcd container：
+
+```
+docker run --net=host --rm --name learn-etcd quay.io/coreos/etcd:v2.3.1
+```
+
+或者
+
+```
+docker run -p 4001:4001 -p 7001:7001 -p 2379:2379 -p 2380:2380 --name learn-etcd --rm quay.io/coreos/etcd:v2.3.1
+```
+
+对应的，也可以在 container 里运行 etcdctl：
+
+```
+docker exec learn-etcd /etcdctl ls /
+```
+
+### 让其他机器可以访问
+
+etcd的默认命令行参数是把和peer通信的port以及和client通信的port都绑定在127.0.0.1上的。所以只有在本机上可以用etcdctl访问etcd服务。为了让其他机器上的程序也能访问本机上的etcd服务，我们需要把ports绑定在本机网卡对应的IP地址上。比如我们在core-01上执行以下命令：
+
+```
+etcd2 --name etcd01 \
+--initial-advertise-peer-urls http://172.17.8.101:2380 \
+--listen-peer-urls http://172.17.8.101:2380 \
+--listen-client-urls http://172.17.8.101:2379,http://127.0.0.1:2379 \
+--advertise-client-urls http://172.17.8.101:2379 \
+--initial-cluster-token etcd-cluster-1 \
+--initial-cluster etcd01=http://172.17.8.101:2380 \
+--initial-cluster-state new
+```
+
+随后可以在core-02上用etcdctl访问：
+
+```
+etcdctl --endpoints=http://172.17.8.101:2379,http://172.17.8.102:4001 ls /
+```
 
 
+## 多进程机群
+
+上面例子可以拓展到配置一个三个节点的etcd机群。打开3个terminal，在每一个terminal里登陆到一台虚拟机，比如在第一个terminal里执行 `vagrant ssh core-01`。
+
+分别用如下命令启动
+
+```
+INDEX=1
+THIS_IP=172.17.8.10$INDEX
+etcd2 --name etcd01 --initial-advertise-peer-urls http://10.0.1.10:2380 \
+  --listen-peer-urls http://10.0.1.10:2380 \
+  --listen-client-urls http://10.0.1.10:2379,http://127.0.0.1:2379 \
+  --advertise-client-urls http://10.0.1.10:2379 \
+  --initial-cluster-token etcd-cluster-1 \
+  --initial-cluster infra0=http://10.0.1.10:2380,infra1=http://10.0.1.11:2380,infra2=http://10.0.1.12:2380 \
+  --initial-cluster-state new
+```
 
 ## Pitfalls
 
@@ -70,7 +138,7 @@ docker run -p 4001:4001 -p 7001:7001 -p 2379:2379 -p 2380:2380 --name learn-etcd
 
 我搜到[这个页面](https://github.com/coreos/etcd/blob/master/Documentation/op-guide/container.md#docker)里介绍的方法的启发，改用`--net=host`，而不是export各个port，`etcctl -ls /`就可以工作了。
 
-李鹏棒我分析的时候看了`netstat -lntp`的输出：
+李鹏帮我分析的时候看了`netstat -lntp`的输出：
 ```
 core@core-01 ~ $ netstat -lntp
 (Not all processes could be identified, non-owned process info
@@ -101,8 +169,7 @@ tcp6       0      0 :::22                   :::*                    LISTEN      
 ```
 
 借着这个线索，我找到这个
-[讨论](https://github.com/docker/docker/issues/2174)。我采取了一种一种
-做法：在docker命令里明确指明IPv4地址格式：
+[讨论](https://github.com/docker/docker/issues/2174)。我采取了一种做法：在docker命令里明确指明IPv4地址格式：
 
 ```
 docker run -p 127.0.0.1:4001:4001 -p 127.0.0.1:7001:7001 -p 127.0.0.1:2379:2379 -p 127.0.0.1:2380:2380 --name learn-etcd --rm quay.io/coreos/etcd:v2.3.2
@@ -122,58 +189,3 @@ core@core-01 ~ $ docker exec learn-etcd /etcdctl set /foo bar
 bar
 ```
 
-### Don't Use CoreOS's etcd
-
-不知道为什么，CoreOS自带的etcd和etcdctl的版本不一致。而且etcd的版本很
-老。所以确实得用Docker运行最新的image。
-
-```
-core@core-01 ~ $ cat /etc/os-release
-NAME=CoreOS
-ID=coreos
-VERSION=899.17.0
-VERSION_ID=899.17.0
-BUILD_ID=2016-05-03-2151
-PRETTY_NAME="CoreOS 899.17.0"
-ANSI_COLOR="1;32"
-HOME_URL="https://coreos.com/"
-BUG_REPORT_URL="https://github.com/coreos/bugs/issues"
-core@core-01 ~ $ etcd --version
-etcd version 0.4.9
-core@core-01 ~ $ etcdctl --version
-etcdctl version 2.2.3
-```
-
-```
-core@core-01 ~ $ cat /etc/os-release 
-NAME=CoreOS
-ID=coreos
-VERSION=1097.0.0
-VERSION_ID=1097.0.0
-BUILD_ID=2016-07-02-0145
-PRETTY_NAME="CoreOS 1097.0.0 (MoreOS)"
-ANSI_COLOR="1;32"
-HOME_URL="https://coreos.com/"
-BUG_REPORT_URL="https://github.com/coreos/bugs/issues"
-core@core-01 ~ $ etcd --version
-etcd version 0.4.9
-core@core-01 ~ $ etcdctl --version
-etcdctl version 2.3.2
-```
-
-```
-core@core-01 ~ $ cat /etc/os-release 
-NAME=CoreOS
-ID=coreos
-VERSION=899.17.0
-VERSION_ID=899.17.0
-BUILD_ID=2016-05-03-2151
-PRETTY_NAME="CoreOS 899.17.0"
-ANSI_COLOR="1;32"
-HOME_URL="https://coreos.com/"
-BUG_REPORT_URL="https://github.com/coreos/bugs/issues"
-core@core-01 ~ $ etcd --version
-etcd version 0.4.9
-core@core-01 ~ $ etcdctl --version
-etcdctl version 2.2.3
-```
