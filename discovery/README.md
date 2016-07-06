@@ -84,43 +84,65 @@ docker exec learn-etcd /etcdctl ls /
 
 ### 让其他机器可以访问
 
-etcd的默认命令行参数是把和peer通信的port以及和client通信的port都绑定在127.0.0.1上的。所以只有在本机上可以用etcdctl访问etcd服务。为了让其他机器上的程序也能访问本机上的etcd服务，我们需要把ports绑定在本机网卡对应的IP地址上。比如我们在core-01上执行以下命令：
+etcd的默认命令行参数是把和peer通信的port以及和client通信的port都绑定在127.0.0.1上的。所以只有在本机上可以用etcdctl访问etcd服务。为了让其他机器上的程序也能访问本机上的etcd服务，我们需要把ports绑定在本机网卡对应的IP地址上。比如我们在core-04上执行以下命令：
 
 ```
-etcd2 --name etcd01 \
---initial-advertise-peer-urls http://172.17.8.101:2380 \
---listen-peer-urls http://172.17.8.101:2380 \
---listen-client-urls http://172.17.8.101:2379,http://127.0.0.1:2379 \
---advertise-client-urls http://172.17.8.101:2379 \
---initial-cluster-token etcd-cluster-1 \
---initial-cluster etcd01=http://172.17.8.101:2380 \
+THIS_IP=$(ifconfig | grep 172.17.8. | awk '{print $2;}')
+etcd2 --name boot01 \
+--initial-advertise-peer-urls http://$THIS_IP:2380 \
+--listen-peer-urls http://$THIS_IP:2380 \
+--listen-client-urls http://$THIS_IP:2379,http://127.0.0.1:2379 \
+--advertise-client-urls http://$THIS_IP:2379 \
+--initial-cluster-token bootstrap \
+--initial-cluster boot01=http://$THIS_IP:2380 \
 --initial-cluster-state new
 ```
 
-随后可以在core-02上用etcdctl访问：
+随后可以在其他任何一台机器上用etcdctl访问：
 
 ```
-etcdctl --endpoints=http://172.17.8.101:2379,http://172.17.8.102:4001 ls /
+etcdctl --endpoints=http://172.17.8.104:2379,http://172.17.8.104:4001 ls /
 ```
 
 
 ## 多进程机群
 
-上面例子可以拓展到配置一个三个节点的etcd机群。打开3个terminal，在每一个terminal里登陆到一台虚拟机，比如在第一个terminal里执行 `vagrant ssh core-01`。
+### 固定大小明确IP
 
-分别用如下命令启动
+上面例子可以拓展到配置一个三个节点的etcd机群。打开3个terminal，在每一个terminal里登陆到一台虚拟机，比如在第一个terminal里执行 `vagrant ssh core-01`。重复三次之后就ssh到三台虚拟机上了。在每个terminal窗口里输入以下同一组命令：
 
 ```
-INDEX=1
-THIS_IP=172.17.8.10$INDEX
-etcd2 --name etcd01 --initial-advertise-peer-urls http://10.0.1.10:2380 \
-  --listen-peer-urls http://10.0.1.10:2380 \
-  --listen-client-urls http://10.0.1.10:2379,http://127.0.0.1:2379 \
-  --advertise-client-urls http://10.0.1.10:2379 \
+CLUSTER="etcd1=http://172.17.8.101:2380,etcd2=http://172.17.8.102:2380,etcd3=http://172.17.8.103:2380"
+THIS_IP=$(ifconfig | grep 172.17.8. | awk '{print $2;}')
+INDEX=$(echo $THIS_IP | tail -c 2)
+etcd2 --name etcd$INDEX \
+  --initial-advertise-peer-urls http://$THIS_IP:2380 \
+  --listen-peer-urls http://$THIS_IP:2380 \
+  --listen-client-urls http://$THIS_IP:2379,http://127.0.0.1:2379 \
+  --advertise-client-urls http://$THIS_IP:2379 \
   --initial-cluster-token etcd-cluster-1 \
-  --initial-cluster infra0=http://10.0.1.10:2380,infra1=http://10.0.1.11:2380,infra2=http://10.0.1.12:2380 \
+  --initial-cluster $CLUSTER \
   --initial-cluster-state new
 ```
+
+然后登陆到 core-04 上验证往一个节点里写的内容可以从其他节点读出来：
+
+```
+vagrant ssh core-04
+core@core-04 ~ $ etcdctl --endpoints=http://172.17.8.101:2379 ls /
+core@core-04 ~ $ etcdctl --endpoints=http://172.17.8.101:2379 set /foo bar
+bar
+core@core-04 ~ $ etcdctl --endpoints=http://172.17.8.101:2379 get /foo
+bar
+core@core-04 ~ $ etcdctl --endpoints=http://172.17.8.102:2379 get /foo
+bar
+core@core-04 ~ $ etcdctl --endpoints=http://172.17.8.103:2379 get /foo
+bar
+```
+
+### 利用Discovery服务
+
+很多时候，我们并不能提前知道host的IP地址，比如，当host都是通过DHCP获取IP地址的时候。
 
 ## Pitfalls
 
