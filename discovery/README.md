@@ -45,7 +45,7 @@ for ((i = 1; i <= 4; i++ )); do vagrant ssh core-0$i -c "ifconfig eth1"; done
 
 ### 在host上运行
 
-我们在名为 core-01 （IP地址是172.17.8.101）的虚拟机上启动一个单进程的etcd机群很容易：
+我们在任何一台虚拟机上启动一个单进程的etcd机群很容易：
 
 ```
 vagrant ssh core-04
@@ -67,13 +67,22 @@ CoreOS里 `/usr/bin/etcd2` 和 `/usr/bin/etcdctl` 的版本是一致的，而 `/
 我们也可以通过 Docker 启动一个对应版本的 etcd container：
 
 ```
-docker run --net=host --rm --name learn-etcd quay.io/coreos/etcd:v2.3.1
+docker run \
+  --net=host \
+  --name learn-etcd \
+  --rm quay.io/coreos/etcd:v2.3.1
 ```
 
 或者
 
 ```
-docker run -p 4001:4001 -p 7001:7001 -p 2379:2379 -p 2380:2380 --name learn-etcd --rm quay.io/coreos/etcd:v2.3.1
+docker run \
+  -p 127.0.0.1:4001:4001 \
+  -p 127.0.0.1:7001:7001 \
+  -p 127.0.0.1:2379:2379 \
+  -p 127.0.0.1:2380:2380 \
+  --name learn-etcd \
+  --rm quay.io/coreos/etcd:v2.3.1
 ```
 
 对应的，也可以在 container 里运行 etcdctl：
