@@ -3,5 +3,4 @@
 *.gz
 *.etcd
 etcd*
-discovery*
 *.log
